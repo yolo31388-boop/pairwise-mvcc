@@ -1,0 +1,29 @@
+实现一个 MVCC 事务存储引擎（快照隔离 + 写冲突 + WAL 恢复），
+只用 Python 标准库。
+
+背景：mvcc.py 是骨架（MVCCStore 类方法 raise NotImplementedError），
+tests/test_mvcc.py 是验收测试。
+
+需求（feature，按数据库事务教科书语义）：
+1. begin() -> tx_id：事务快照点（看到的所有已提交版本 <= tx_id）
+2. get(tx, key)：先看本事务未提交的写；否则读最新已提交版本
+   （快照隔离：不读其他事务未提交数据，也不看本事务快照之后的提交）
+3. put(tx, key, value)：key 被其他活跃事务写锁 -> DeadlockError
+   （保守写锁检测）
+4. delete(tx, key)：写 tombstone；get 返回 None
+5. commit(tx)：first-committer-wins——若本事务写过的 key 在我
+   begin 之后已被更高编号事务提交 -> ConflictError（版本过期）
+   ；否则原子可见
+6. rollback(tx)：丢弃本事务所有未提交写
+7. WAL：persist_wal(path) 把已提交事务的写操作顺序写盘；
+   recover_from_wal(path) 重放，只恢复已提交事务，未提交丢弃
+
+验收：
+- python -m pytest tests/test_mvcc.py -q 全绿
+- 覆盖：基础读写/回滚/更新、未提交不可见、旧快照不变、
+  写写冲突（Commit 时）、写锁冲突（Put 时）、删除与重插、
+  WAL 恢复（已提交恢复、未提交丢弃、删除恢复）
+
+要求：
+- 只 import 标准库；禁止全局锁/线程（单线程事务交错即可）
+- 别改测试
